@@ -65,12 +65,28 @@ def test_build_block_decoder_source_emits_realistic_entry_sequence():
 
 
 def test_decode_block_payload_rebuilds_raw_block_values():
-    payload = bytes([0x01, 0x04, 0x03, 0x01, 0x01, 0x02, 0xFF])
+    # Payload with unrecognised inner tag falls through to zero-fill
+    payload = bytes([0x01, 0x04, 0x04, 0x01, 0x01, 0x02, 0xFF])
 
     values = decode_block_payload(payload)
 
     assert values[:4] == [0x00, 0x00, 0x00, 0x00]
     assert len(values) == 64
+
+
+def test_decode_block_payload_rle_decodes_runs():
+    # RLE-encoded: 64 pixels of value 2
+    payload = bytes([0x01, 0x04, 0x03, 64, 2, 0xFF])
+    values = decode_block_payload(payload)
+    assert values == [2] * 64
+
+
+def test_decode_block_payload_rle_partial_fills_remaining_with_zero():
+    # RLE with fewer than 64 pixels: 0x03 + 10 + 3 + 0xFF = 4 bytes
+    payload = bytes([0x01, 0x04, 0x03, 10, 3, 0xFF])
+    values = decode_block_payload(payload)
+    assert values[:10] == [3] * 10
+    assert values[10:] == [0] * 54
 
 
 def test_build_block_payload_bytes_stacks_multiple_blocks():

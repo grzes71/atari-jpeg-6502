@@ -40,6 +40,7 @@ def _run_experiments(
         {"label": "hybrid-aggressive", "strategy": "hybrid", "keep_coeffs": 10, "quant_table": "aggressive"},
         {"label": "hybrid-balanced", "strategy": "hybrid", "keep_coeffs": 10, "quant_table": "balanced"},
         {"label": "hybrid-fine", "strategy": "hybrid", "keep_coeffs": 10, "quant_table": "fine"},
+        {"label": "hybrid-lossless", "strategy": "hybrid", "keep_coeffs": 10, "quant_table": "lossless"},
     ]
 
     results: list[dict[str, Any]] = []
@@ -52,6 +53,7 @@ def _run_experiments(
             keep_coeffs=cfg["keep_coeffs"],
             strategy=cfg["strategy"],
             quant_table=cfg["quant_table"],
+            mode=cfg.get("mode", "pixel"),
         )
         result["label"] = cfg["label"]
         results.append(result)

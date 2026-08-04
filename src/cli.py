@@ -38,7 +38,8 @@ def main() -> None:
     parser.add_argument("--keep-coeffs", type=int, default=10, help="Number of zigzag coefficients preserved per 8x8 block (lower = smaller output, lower quality)")
     parser.add_argument("--ai", action="store_true", help="Use AI-assisted DCT-aware encoder (v1.0.0)")
     parser.add_argument("--strategy", choices=["zigzag", "magnitude", "hybrid"], default="hybrid", help="Coefficient selection strategy (only with --ai)")
-    parser.add_argument("--quant-table", choices=["default", "aggressive", "balanced", "fine"], default="default", help="Quantization table (only with --ai)")
+    parser.add_argument("--quant-table", choices=["default", "aggressive", "balanced", "fine", "lossless"], default="balanced", help="Quantization table (only with --ai)")
+    parser.add_argument("--mode", choices=["pixel", "coefficients"], default="pixel", help="Output mode: pixel (6502 compatible, default) or coefficients (needs DCT decoder)")
     parser.add_argument("--min-keep", type=int, default=4, help="Minimum coefficients per block (hybrid strategy)")
     parser.add_argument("--max-keep", type=int, default=64, help="Maximum coefficients per block (hybrid strategy)")
     args = parser.parse_args()
@@ -63,6 +64,7 @@ def main() -> None:
             keep_coeffs=args.keep_coeffs,
             strategy=args.strategy,
             quant_table=args.quant_table,
+            mode=args.mode,
             selector_config=config,
             export_png=args.export_png,
             scale=args.scale,
