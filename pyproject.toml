@@ -10,6 +10,8 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
   "Pillow>=10.0.0",
+  "numpy>=1.24",
+  "scikit-image>=0.21",
   "py65>=0.0.0",
 ]
 
@@ -27,6 +29,8 @@ version = {file = "VERSION"}
 [tool.setuptools]
 package-dir = {"" = "src"}
 py-modules = [
+  "adaptive_quantization",
+  "ai_selector",
   "asm_tools",
   "basis_generator",
   "block_to_6502",
@@ -43,6 +47,7 @@ py-modules = [
   "image_io",
   "inspect_preview_issue",
   "mads_generator",
+  "metrics",
   "pipeline",
   "png_export",
   "quantization",

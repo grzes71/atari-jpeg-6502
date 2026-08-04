@@ -90,3 +90,25 @@ def build_simple_block_payload(values: list[int] | tuple[int, ...], keep: int = 
         packed[byte_index] |= (value & 0x03) << bit_offset
 
     return bytes([0x01, len(packed)]) + bytes(packed)
+
+
+def build_sparse_coefficient_payload(
+    indices: list[int],
+    values: list[int],
+) -> bytes:
+    """Encode a sparse set of (zigzag-index, quantized-coefficient) pairs.
+
+    The payload uses tag ``0x02`` inside a standard ``0x01`` block envelope.
+    Each pair occupies 2 bytes: index (0-63) and signed 8-bit value.
+    """
+    if len(indices) != len(values):
+        raise ValueError("indices and values must have the same length")
+    if not indices:
+        return bytes([0x01, 0x01, 0x02])
+
+    inner = bytearray([0x02])
+    for idx, val in zip(indices, values):
+        inner.append(idx & 0x3F)
+        inner.append(val & 0xFF)
+
+    return bytes([0x01, len(inner)]) + bytes(inner)
