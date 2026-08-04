@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "atari-jpeg-6502"
+version = "0.1.0"
+description = "A compact 6502-oriented JPEG-inspired image compressor/decompressor prototype"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "Pillow>=10.0.0",
+  "py65>=0.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+]
+
+[project.scripts]
+switch = "switch.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+py-modules = [
+  "asm_tools",
+  "basis_generator",
+  "block_to_6502",
+  "block_utils",
+  "build_mads",
+  "cli",
+  "dct",
+  "dc_block",
+  "debug_decoder",
+  "decode_simple",
+  "decoder_model",
+  "encoder",
+  "fileformat",
+  "image_io",
+  "inspect_preview_issue",
+  "mads_generator",
+  "pipeline",
+  "png_export",
+  "quantization",
+  "rle",
+  "run_decoder_test",
+  "zigzag",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["switch*", "rgb2a8*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]

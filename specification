@@ -1,0 +1,270 @@
+# JPEG-6502 Specification v1.2
+
+## Cel projektu
+
+Stworzenie stratnego kodeka obrazu inspirowanego JPEG, zoptymalizowanego
+pod procesor MOS 6502 (Atari 8-bit).
+
+### Założenia
+
+- Kompresja wykonywana wyłącznie na PC (Python 3).
+- Dekompresja wykonywana wyłącznie na 6502.
+- Dekoder powinien zajmować mniej niż 4 KB kodu.
+- Brak liczb zmiennoprzecinkowych.
+- Cała kosztowna matematyka wykonywana offline przez kompresor.
+- Najważniejszym kryterium jest minimalizacja złożoności dekodera 6502,
+  nawet kosztem bardziej złożonego kompresora w Pythonie.
+
+------------------------------------------------------------------------
+
+# Format obrazu
+
+- Rozdzielczość: 160×192 pikseli.
+- Format piksela: 2 bity (4 kolory).
+- Wartości pikseli: 0..3.
+- Dekoder nie zna RGB ani YCbCr. Odtwarza wyłącznie indeksy kolorów.
+- Obraz jest przechowywany jako mapa indeksów kolorów, a paleta kolorów jest
+  zewnętrznie zdefiniowana przez aplikację hosta.
+
+------------------------------------------------------------------------
+
+# Podział na bloki
+
+Obraz jest dzielony na bloki 8×8 pikseli.
+
+- 20 bloków poziomo.
+- 24 bloki pionowo.
+- Łącznie 480 bloków.
+- Bloki są przetwarzane w porządku rasterowym: najpierw lewy-górny rząd,
+  potem kolejne rzędy w dół.
+
+------------------------------------------------------------------------
+
+# Kompresor (Python)
+
+Dla każdego bloku wykonywane są kolejne kroki:
+
+1. 2D DCT.
+2. Kwantyzacja.
+3. ZigZag.
+4. Zachowanie tylko pierwszych 10 współczynników.
+5. Kodowanie RLE.
+6. Zapis do pliku.
+
+Kompresor jest odpowiedzialny za wszystkie skomplikowane obliczenia i za
+wygenerowanie danych, które dekoder 6502 może odtworzyć przy użyciu prostych
+operacji.
+
+------------------------------------------------------------------------
+
+# Kwantyzacja
+
+Dowolna tablica kwantyzacji może być zdefiniowana przez kompresor.
+
+Po podzieleniu przez tablicę kwantyzacji wykonywane jest zaokrąglenie do
+liczby całkowitej.
+
+Współczynniki po kwantyzacji są przechowywane jako signed int8
+(zakres -128..127).
+
+Kompressor musi zapewnić, że wszystkie wartości po kwantyzacji mieszczą się
+w tym zakresie. W przeciwnym razie należy zastosować klampowanie lub inną
+strategię redukcji.
+
+------------------------------------------------------------------------
+
+# Kodowanie RLE
+
+Brak Huffmana.
+
+Każda para ma postać:
+
+    <count_zero><value>
+
+gdzie:
+
+- count_zero = liczba kolejnych zer przed pierwszym niezerowym
+  współczynnikiem.
+- value = pierwszy niezerowy współczynnik.
+
+Specjalny bajt 0xFF oznacza End Of Block (EOB).
+
+### Zasady dekodowania
+
+- Jeżeli po przeczytaniu pary wartość jest 0xFF, oznacza to koniec bloku.
+- Jeżeli wartość nie jest 0xFF, dekoder odczytuje count_zero oraz value.
+- Następnie dekoder wstawia count_zero zer do strumienia współczynników,
+  a potem zapisuje value.
+- Jeżeli po przetworzeniu wszystkich par nie zapisano jeszcze wszystkich 64
+  współczynników, brakujące pozycje są uzupełniane zerami.
+- Jeżeli w bloku nie ma żadnych niezerowych współczynników, zapisany jest
+  tylko bajt EOB.
+
+### Dodatkowe wymagania
+
+- count_zero jest liczbą bajtów z zakresu 0..255.
+- Jeżeli liczba kolejnych zer przekracza 255, należy użyć kilku par.
+- Współczynniki są kodowane w kolejności zgodnej z porządkiem po ZigZag.
+- Pierwszy współczynnik po ZigZag jest współczynnikiem DC.
+
+------------------------------------------------------------------------
+
+# Format pliku
+
+Plik ma strukturę:
+
+1. Nagłówek:
+   - Magic: 4 bajty "J650"
+   - Width (uint16, little-endian)
+   - Height (uint16, little-endian)
+   - BlockSize (uint8, wartość 8)
+   - Reserved (uint8, wartość 0)
+
+2. Dane bloków:
+   - Każdy blok jest zapisywany kolejno po nagłówku.
+   - Bloki są zapisywane w porządku rasterowym.
+   - Każdy blok składa się z jednego lub więcej bajtów RLE.
+   - Zakończenie bloku oznacza bajt 0xFF.
+
+### Przykład nagłówka
+
+- 4 bajty: "J650"
+- 2 bajty szerokości
+- 2 bajty wysokości
+- 1 bajt block size
+- 1 bajt reserved
+
+Jeżeli plik jest uszkodzony lub ma niezgodny rozmiar, dekoder powinien
+zakończyć działanie z błędem.
+
+------------------------------------------------------------------------
+
+# Dekoder 6502
+
+Dekoder wykonuje następujący algorytm:
+
+1. Odczytaj nagłówek pliku.
+2. Odczytaj blok.
+3. Rozkoduj RLE.
+4. Uzupełnij brakujące współczynniki zerami.
+5. Dekwantyzacja.
+6. Rekonstrukcja bloku.
+7. Ograniczenie wartości do zakresu 0..3.
+8. Zapis do pamięci obrazu.
+
+### Wymagania dekodera
+
+- Dekoder nie wykonuje pełnej odwrotnej DCT.
+- Dekoder używa jedynie prostych operacji: odczytu tablic, dodawania,
+  przesunięć bitowych i zapisu do pamięci.
+- Kod powinien być możliwie krótki i prosty, nawet jeśli kompresor jest
+  bardziej złożony.
+
+------------------------------------------------------------------------
+
+# Arytmetyka
+
+- Dane pośrednie używają typu int16.
+- Wszystkie wartości współczynników i skalowania są obsługiwane w formacie
+  fixed-point Q8.8.
+- Brak liczb zmiennoprzecinkowych.
+
+------------------------------------------------------------------------
+
+# Tablice
+
+Dekoder zawiera:
+
+- tablicę ZigZag,
+- tablicę kwantyzacji,
+- tablice rekonstrukcji bazowych bloków.
+
+### Rekonstrukcja bez pełnego IDCT
+
+Zamiast implementować pełną odwrotną DCT, kompresor powinien wygenerować
+offline tablice bazowych bloków odpowiadających każdemu z zachowywanych
+współczynników.
+
+Dekoder:
+
+1. Zeruje blok 8×8.
+2. Dla każdego niezerowego współczynnika odczytuje odpowiedni wzorzec z tablic.
+3. Skaluje wzorzec przez wartość współczynnika.
+4. Dodaje go do bufora bloku.
+5. Po zakończeniu wykonuje clipping do zakresu 0..3.
+
+Takie rozwiązanie eliminuje konieczność wykonywania pełnej odwrotnej DCT na
+procesorze 6502.
+
+Korzyści:
+
+- znacznie prostszy kod,
+- mniej mnożeń,
+- mniejsze zużycie CPU,
+- możliwość agresywnej optymalizacji w asemblerze.
+
+------------------------------------------------------------------------
+
+# Optymalizacja DC-only
+
+Jeżeli po RLE pozostaje wyłącznie współczynnik DC, dekoder powinien
+natychmiast wypełnić cały blok jedną wartością, bez wykonywania dalszych
+obliczeń.
+
+To jest ważna optymalizacja dla bloków o małej złożoności i pozwala znacznie
+zmniejszyć liczbę operacji na 6502.
+
+------------------------------------------------------------------------
+
+# Struktura pamięci dekodera
+
+Dekoder powinien działać z ograniczoną pamięcią RAM.
+
+### Zalecane bufory
+
+- Bufor wejściowy bloku: 64 współczynniki.
+- Bufor wyjściowy bloku: 64 wartości pikseli.
+- Bufor obrazu finalnego: 160×192 pikseli, zapisanych w formacie 2-bitowym
+  (4 piksele na bajt).
+
+### Dodatkowe ograniczenie
+
+- Wskaźniki do danych muszą być minimalistyczne.
+- Nie należy używać złożonych struktur danych ani dynamicznej alokacji.
+
+------------------------------------------------------------------------
+
+# Docelowa struktura projektu
+
+jpeg6502/
+    encoder.py
+    decoder6502.asm
+    dct.py
+    quantization.py
+    zigzag.py
+    basis_generator.py
+    fileformat.py
+    tests/
+
+------------------------------------------------------------------------
+
+# Wymagania jakościowe
+
+- Dekoder powinien być możliwie prosty i przewidywalny.
+- Kompresor może być bardziej złożony, jeśli poprawi jakość lub uprości dekoder.
+- Wymagane jest zachowanie poprawnej zgodności między kompresorem a dekoderem.
+- Wszystkie liczbowe formaty muszą być ściśle zdefiniowane.
+
+------------------------------------------------------------------------
+
+# Plan testów
+
+Należy przygotować testy dla:
+
+- pojedynczego bloku z samym DC,
+- bloku z kilkoma współczynnikami niezerowymi,
+- bloku z samym EOB,
+- pełnego obrazu 160×192,
+- niepoprawnego pliku z błędnym nagłówkiem,
+- pliku z niepełnymi danymi bloków.
+

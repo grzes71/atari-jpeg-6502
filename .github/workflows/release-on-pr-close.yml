@@ -1,0 +1,195 @@
+name: Release On PR Close
+
+on:
+  pull_request:
+    types:
+      - closed
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  determine-release:
+    if: github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main'
+    runs-on: ubuntu-latest
+    outputs:
+      release_needed: ${{ steps.classify.outputs.release_needed }}
+      bump_level: ${{ steps.classify.outputs.bump_level }}
+      notes: ${{ steps.classify.outputs.notes }}
+    steps:
+      - name: Classify commits from merged PR
+        id: classify
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const pullNumber = context.payload.pull_request.number;
+
+            const commits = await github.paginate(github.rest.pulls.listCommits, {
+              owner,
+              repo,
+              pull_number: pullNumber,
+              per_page: 100,
+            });
+
+            const lines = [];
+            let hasMajor = false;
+            let hasMinor = false;
+            let hasPatch = false;
+            let hasOnlyDocsOrChore = true;
+
+            const majorHeader = /^([a-z]+)(\([^\)]*\))?!:/i;
+            const minorHeader = /^feat(\([^\)]*\))?:/i;
+            const patchHeader = /^(fix|perf|refactor|revert)(\([^\)]*\))?:/i;
+            const ignoredHeader = /^(docs|chore)(\([^\)]*\))?:/i;
+
+            for (const c of commits) {
+              const message = c.commit.message || "";
+              const firstLine = message.split("\n")[0].trim();
+              const normalized = firstLine.toLowerCase();
+
+              lines.push(`- ${firstLine} (${c.sha.slice(0, 7)})`);
+
+              const isIgnored = ignoredHeader.test(firstLine);
+              if (!isIgnored && normalized.length > 0) {
+                hasOnlyDocsOrChore = false;
+              }
+
+              const hasBreakingFooter = /(^|\n)BREAKING CHANGE:/i.test(message);
+              if (majorHeader.test(firstLine) || hasBreakingFooter) {
+                hasMajor = true;
+                continue;
+              }
+
+              if (minorHeader.test(firstLine)) {
+                hasMinor = true;
+                continue;
+              }
+
+              if (patchHeader.test(firstLine)) {
+                hasPatch = true;
+              }
+            }
+
+            let bumpLevel = "none";
+            if (!hasOnlyDocsOrChore) {
+              if (hasMajor) {
+                bumpLevel = "major";
+              } else if (hasMinor) {
+                bumpLevel = "minor";
+              } else if (hasPatch) {
+                bumpLevel = "patch";
+              }
+            }
+
+            const releaseNeeded = bumpLevel !== "none";
+            const summary = [
+              `PR #${pullNumber}`,
+              `bump=${bumpLevel}`,
+              `release_needed=${releaseNeeded}`,
+              "",
+              "Commits:",
+              ...lines,
+            ].join("\n");
+
+            core.info(summary);
+            core.setOutput("release_needed", String(releaseNeeded));
+            core.setOutput("bump_level", bumpLevel);
+            core.setOutput("notes", summary);
+
+  release:
+    needs:
+      - determine-release
+    if: needs.determine-release.outputs.release_needed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Bump version in pyproject.toml
+        id: bump
+        env:
+          BUMP_LEVEL: ${{ needs.determine-release.outputs.bump_level }}
+        run: |
+          python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          bump_level = os.environ["BUMP_LEVEL"].strip()
+          pyproject = Path("pyproject.toml")
+          content = pyproject.read_text(encoding="utf-8")
+
+          match = re.search(r'(?m)^version\s*=\s*"(\d+)\.(\d+)\.(\d+)"\s*$', content)
+          if not match:
+              raise SystemExit("Could not find [project].version in pyproject.toml")
+
+          major, minor, patch = map(int, match.groups())
+          old_version = f"{major}.{minor}.{patch}"
+
+          if bump_level == "major":
+              major += 1
+              minor = 0
+              patch = 0
+          elif bump_level == "minor":
+              minor += 1
+              patch = 0
+          elif bump_level == "patch":
+              patch += 1
+          else:
+              raise SystemExit(f"Unsupported bump level: {bump_level}")
+
+          new_version = f"{major}.{minor}.{patch}"
+          updated = content[: match.start()] + f'version = "{new_version}"' + content[match.end() :]
+          pyproject.write_text(updated, encoding="utf-8")
+
+          out = Path(".github_release_vars")
+          out.write_text(
+              f"old_version={old_version}\nnew_version={new_version}\ntag=v{new_version}\n",
+              encoding="utf-8",
+          )
+          PY
+
+          cat .github_release_vars >> "$GITHUB_OUTPUT"
+
+      - name: Commit version bump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pyproject.toml
+          git commit -m "chore(release): v${{ steps.bump.outputs.new_version }}"
+          git tag "v${{ steps.bump.outputs.new_version }}"
+          git push origin HEAD
+          git push origin "v${{ steps.bump.outputs.new_version }}"
+
+      - name: Build release artifacts
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build
+          python -m build
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.bump.outputs.new_version }}
+          name: v${{ steps.bump.outputs.new_version }}
+          generate_release_notes: true
+          body: |
+            Automated release from merged PR #${{ github.event.pull_request.number }}
+
+            Version bump: `${{ needs.determine-release.outputs.bump_level }}`
+
+            Commit classification:
+            ${{ needs.determine-release.outputs.notes }}
+          files: |
+            dist/*.whl
+            dist/*.tar.gz
