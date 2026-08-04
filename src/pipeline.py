@@ -7,6 +7,7 @@ from ai_selector import SelectionConfig, select_coefficients
 from block_utils import split_image_into_blocks
 from build_mads import export_xex
 from dc_block import DCBlock
+from decompressor_6502 import generate_example_asm
 from decoder_model import build_block_decoder_source
 from dct import forward_dct_2d, inverse_dct_2d, reconstruct_block_from_coefficients
 from encoder import encode_block_dct, encode_image, encode_image_dct
@@ -54,8 +55,12 @@ def run_full_pipeline(
 
     bin_path = encode_image(image, output_bin, keep_coeffs=keep_coeffs)
     asm_path = Path(output_asm)
-    asm_source = build_block_decoder_source(blocks[:3], block_count=len(blocks[:3]))
-    asm_path.write_text(asm_source, encoding="utf-8")
+    generate_example_asm(
+        j650_bin_path=str(bin_path),
+        output_asm_path=str(asm_path),
+        antic_mode=antic_mode,
+        palette=tuple(palette) if palette else (0x00, 0x02, 0x08, 0x0E),
+    )
 
     xex_path = None
     if output_xex is not None:
@@ -115,8 +120,12 @@ def run_ai_pipeline(
         blocks.append(DCBlock.from_rows(tuple(tuple(row) for row in reconstruction)))
 
     asm_path = Path(output_asm)
-    asm_source = build_block_decoder_source(blocks[:3], block_count=len(blocks[:3]))
-    asm_path.write_text(asm_source, encoding="utf-8")
+    generate_example_asm(
+        j650_bin_path=str(bin_path),
+        output_asm_path=str(asm_path),
+        antic_mode=antic_mode,
+        palette=tuple(palette) if palette else (0x00, 0x02, 0x08, 0x0E),
+    )
 
     if output_xex is not None:
         export_xex(asm_path, output_xex, antic_mode=antic_mode, palette=palette)
