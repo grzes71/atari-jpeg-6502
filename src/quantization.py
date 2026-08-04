@@ -48,3 +48,35 @@ def dequantize_block(block: list[list[int]]) -> list[list[int]]:
             dequantized_row.append(int(restored))
         dequantized.append(dequantized_row)
     return dequantized
+
+
+def quantize_block_with_table(block: list[list[int]], table: list[list[int]]) -> list[list[int]]:
+    """Quantize an 8×8 block using a custom quantization table."""
+    if not block or len(block) != 8 or any(len(row) != 8 for row in block):
+        raise ValueError("block must be an 8x8 matrix")
+
+    quantized: list[list[int]] = []
+    for row_index, row in enumerate(block):
+        quantized_row: list[int] = []
+        for col_index, value in enumerate(row):
+            divisor = max(1, table[row_index][col_index])
+            scaled = from_q88(to_q88(value // divisor))
+            clipped = max(-128, min(127, int(scaled)))
+            quantized_row.append(clipped)
+        quantized.append(quantized_row)
+    return quantized
+
+
+def dequantize_block_with_table(block: list[list[int]], table: list[list[int]]) -> list[list[int]]:
+    """Dequantize an 8×8 block using a custom quantization table."""
+    if not block or len(block) != 8 or any(len(row) != 8 for row in block):
+        raise ValueError("block must be an 8x8 matrix")
+
+    dequantized: list[list[int]] = []
+    for row_index, row in enumerate(block):
+        dequantized_row: list[int] = []
+        for col_index, value in enumerate(row):
+            restored = from_q88(to_q88(value) * table[row_index][col_index])
+            dequantized_row.append(int(restored))
+        dequantized.append(dequantized_row)
+    return dequantized

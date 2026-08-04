@@ -3,7 +3,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from pipeline import run_full_pipeline
+from ai_selector import SelectionConfig
+from pipeline import run_ai_pipeline, run_full_pipeline
 
 
 def _parse_palette(value: str | None, antic_mode: str = "E") -> tuple[int, ...] | None:
@@ -35,22 +36,51 @@ def main() -> None:
     parser.add_argument("--palette")
     parser.add_argument("--palette-rgb", dest="palette_rgb")
     parser.add_argument("--keep-coeffs", type=int, default=10, help="Number of zigzag coefficients preserved per 8x8 block (lower = smaller output, lower quality)")
+    parser.add_argument("--ai", action="store_true", help="Use AI-assisted DCT-aware encoder (v1.0.0)")
+    parser.add_argument("--strategy", choices=["zigzag", "magnitude", "hybrid"], default="hybrid", help="Coefficient selection strategy (only with --ai)")
+    parser.add_argument("--quant-table", choices=["default", "aggressive", "balanced", "fine"], default="default", help="Quantization table (only with --ai)")
+    parser.add_argument("--min-keep", type=int, default=4, help="Minimum coefficients per block (hybrid strategy)")
+    parser.add_argument("--max-keep", type=int, default=64, help="Maximum coefficients per block (hybrid strategy)")
     args = parser.parse_args()
 
     palette_value = args.palette or args.palette_rgb
-    run_full_pipeline(
-        input_path=Path(args.input_path),
-        width=args.width,
-        height=args.height,
-        output_bin=args.output_bin,
-        output_asm=args.output_asm,
-        output_xex=args.output_xex,
-        antic_mode=args.antic_mode,
-        palette=_parse_palette(palette_value, antic_mode=args.antic_mode),
-        keep_coeffs=args.keep_coeffs,
-        export_png=args.export_png,
-        scale=args.scale,
-    )
+
+    if args.ai:
+        config = SelectionConfig(
+            strategy=args.strategy,
+            min_keep=args.min_keep,
+            max_keep=args.max_keep,
+        )
+        run_ai_pipeline(
+            input_path=Path(args.input_path),
+            width=args.width,
+            height=args.height,
+            output_bin=args.output_bin,
+            output_asm=args.output_asm,
+            output_xex=args.output_xex,
+            antic_mode=args.antic_mode,
+            palette=_parse_palette(palette_value, antic_mode=args.antic_mode),
+            keep_coeffs=args.keep_coeffs,
+            strategy=args.strategy,
+            quant_table=args.quant_table,
+            selector_config=config,
+            export_png=args.export_png,
+            scale=args.scale,
+        )
+    else:
+        run_full_pipeline(
+            input_path=Path(args.input_path),
+            width=args.width,
+            height=args.height,
+            output_bin=args.output_bin,
+            output_asm=args.output_asm,
+            output_xex=args.output_xex,
+            antic_mode=args.antic_mode,
+            palette=_parse_palette(palette_value, antic_mode=args.antic_mode),
+            keep_coeffs=args.keep_coeffs,
+            export_png=args.export_png,
+            scale=args.scale,
+        )
 
 
 if __name__ == "__main__":

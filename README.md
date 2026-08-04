@@ -5,10 +5,13 @@ Eksperymentalny prototyp kompresora i dekodera obrazu zorientowanego na MOS 6502
 ## Co jest już gotowe
 
 - format archiwum J650 z nagłówkiem i blokowym payloadem,
-- kompresja oparta o prosty model bloków 8×8 i wybór współczynników po transformacie DCT,
+- kompresja oparta o DCT, kwantyzację, ZigZag i RLE na blokach 8×8,
+- **v1.0.0 — AI-Assisted Encoder**: heurystyczny selektor współczynników (zigzag / magnitude / hybrid), adaptacyjna liczba zachowywanych współczynników, trzy tablice kwantyzacji zoptymalizowane dla grafiki Atari (aggressive / balanced / fine), eksperymentalny format zapisu (indeks, wartość),
 - generator szkicu dekodera 6502 w formie pliku assembly,
 - eksport podglądu `.xex` dla Atari 8-bit,
 - eksport podglądu PNG z dekompresją i odwzorowaniem kolorów do stylu Atari,
+- metryki jakości PSNR i SSIM,
+- harness eksperymentów porównujący strategie kompresji,
 - interfejs CLI do całego pipeline’u,
 - obsługa trybów ANTIC D, E i F,
 - pakiet Python z layoutem `src/` i entry pointem konsolowym `switch`.
@@ -32,7 +35,7 @@ python -m pip install -e .
 
 Dzięki temu projekt jest dostępny jako moduł Pythona oraz jako skrypt konsolowy `switch`.
 
-### 2. Przez CLI
+### 2. Przez CLI — pipeline klasyczny
 
 ```bash
 python -m switch sample.bin \
@@ -48,21 +51,30 @@ python -m switch sample.bin \
   --scale 2
 ```
 
-Alternatywnie po instalacji można użyć:
+### 3. Przez CLI — AI-Assisted Encoder (v1.0.0)
 
 ```bash
-switch sample.bin \
+python -m switch sample.bin \
   --width 160 \
   --height 192 \
-  --output-bin output.j650 \
-  --output-asm decoder.asm \
-  --output-xex preview.xex \
-  --export-png preview.png \
-  --antic-mode E \
-  --palette 0x00,0x02,0x08,0x0E \
-  --keep-coeffs 10 \
-  --scale 2
+  --ai \
+  --strategy hybrid \
+  --quant-table balanced \
+  --min-keep 4 \
+  --max-keep 64 \
+  --output-bin output_ai.j650 \
+  --output-asm decoder.asm
 ```
+
+Dostępne strategie (`--strategy`):
+- `zigzag` — klasyczny porządek ZigZag,
+- `magnitude` — współczynniki o największej amplitudzie,
+- `hybrid` — adaptacyjna liczba współczynników z wagami pozycyjnymi.
+
+Dostępne tablice kwantyzacji (`--quant-table`):
+- `default` / `aggressive` — agresywna, najwyższa kompresja,
+- `balanced` — zbalansowana,
+- `fine` — wyższa jakość.
 
 Przykładowo:
 - `--antic-mode E` oznacza 160×192 obrazu w 2 bpp / 4 kolory,
@@ -71,7 +83,7 @@ Przykładowo:
 - `--export-png` tworzy podgląd obrazu w formacie PNG,
 - `--scale` zwiększa rozdzielczość PNG przez skalowanie najbliższego sąsiada.
 
-### 3. Przez Python API
+### 4. Przez Python API — pipeline klasyczny
 
 ```python
 from pipeline import run_full_pipeline
@@ -89,6 +101,35 @@ run_full_pipeline(
     export_png="preview.png",
     scale=2,
 )
+```
+
+### 5. Przez Python API — AI-Assisted Encoder
+
+```python
+from pipeline import run_ai_pipeline, run_experiment
+from ai_selector import SelectionConfig
+
+# Pełny pipeline AI
+run_ai_pipeline(
+    input_path="sample.bin",
+    width=160,
+    height=192,
+    output_bin="output_ai.j650",
+    strategy="hybrid",
+    quant_table="balanced",
+    selector_config=SelectionConfig(min_keep=4, max_keep=64),
+)
+
+# Pojedynczy eksperyment z metrykami
+result = run_experiment(
+    "sample.bin",
+    width=160,
+    height=192,
+    keep_coeffs=8,
+    strategy="zigzag",
+    quant_table="balanced",
+)
+print(result["psnr"], result["ssim"], result["file_size_bytes"])
 ```
 
 ## Wygenerowane pliki
@@ -110,6 +151,16 @@ Dopuszczalny zakres `--keep-coeffs` to `1..64`:
 - `64` – praktycznie brak redukcji współczynników, najwyższa jakość, największy rozmiar pliku.
 
 W praktyce wartości z zakresu `3..20` dają najbardziej sensowne przejścia między jakością a kompresją.
+
+## Eksperymenty
+
+Porównanie wszystkich strategii i tablic kwantyzacji na jednym obrazie:
+
+```bash
+python -m experiments.runner samples/witcher3.bin --width 160 --height 192 --output-json results.json
+```
+
+Wynikiem jest tabela z PSNR, SSIM, rozmiarem pliku, liczbą współczynników i czasem kompresji dla każdej konfiguracji.
 
 ## Testy
 
