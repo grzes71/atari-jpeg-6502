@@ -81,13 +81,17 @@ def run_ai_pipeline(
     strategy: str = "hybrid",
     quant_table: str = "default",
     selector_config: SelectionConfig | None = None,
+    mode: str = "pixel",
     export_png: str | Path | None = None,
     scale: int = 2,
 ) -> dict:
     """Run the AI-assisted DCT-aware encoding pipeline.
 
-    Returns a dict with ``image``, ``blocks``, ``bin_path``, ``asm_path``,
-    and quality metrics when an original image is available.
+    *mode*: ``"pixel"`` (default) — reconstruct pixels from selected
+    coefficients, 6502-decoder compatible.  ``"coefficients"`` — store
+    sparse DCT coefficients (needs DCT-capable decoder).
+
+    Returns a dict with ``image``, ``blocks``, ``bin_path``, ``asm_path``.
     """
     image = load_binary_image_2bpp(input_path, width=width, height=height)
 
@@ -98,6 +102,7 @@ def run_ai_pipeline(
         strategy=strategy,
         quant_table=quant_table,
         selector_config=selector_config,
+        mode=mode,
     )
 
     blocks: list[DCBlock] = []
@@ -141,8 +146,12 @@ def run_experiment(
     strategy: str = "hybrid",
     quant_table: str = "default",
     selector_config: SelectionConfig | None = None,
+    mode: str = "pixel",
 ) -> dict:
     """Run a single experiment: encode + decode + measure quality.
+
+    *mode*: ``"pixel"`` decodes via standard J650 pixel path (6502 compatible).
+    ``"coefficients"`` decodes via DCT dequantization + IDCT.
 
     Returns a dict with PSNR, SSIM, file size, coefficient count, and
     compression time.
@@ -164,12 +173,18 @@ def run_experiment(
             strategy=strategy,
             quant_table=quant_table,
             selector_config=selector_config,
+            mode=mode,
         )
         elapsed = time.perf_counter() - start
 
-        from encoder import decode_dct_archive
+        if mode == "coefficients":
+            from encoder import decode_dct_archive
 
-        reconstructed = decode_dct_archive(tmp_path, quant_table=quant_table)
+            reconstructed = decode_dct_archive(tmp_path, quant_table=quant_table)
+        else:
+            from decode_simple import decode_simple_j650
+
+            reconstructed = decode_simple_j650(tmp_path)
 
         # Scale 0..3 pixel values to 0..255 for meaningful PSNR/SSIM
         orig_scaled = [[p * 85 for p in row] for row in image]
@@ -209,6 +224,7 @@ def run_experiment(
             "strategy": strategy,
             "quant_table": quant_table,
             "keep_coeffs": keep_coeffs,
+            "mode": mode,
         }
     finally:
         tmp_path.unlink(missing_ok=True)

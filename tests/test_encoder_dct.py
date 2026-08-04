@@ -48,6 +48,45 @@ class TestEncodeBlockDCT:
         result = encode_block_dct(block, keep_coeffs=4, strategy="zigzag")
         assert result == b"\xff"
 
+    # --- pixel mode ----------------------------------------------------------
+
+    def test_pixel_mode_produces_packed_format(self) -> None:
+        block = [[(x + y) % 4 for x in range(8)] for y in range(8)]
+        result = encode_block_dct(block, keep_coeffs=8, strategy="zigzag", mode="pixel")
+        assert len(result) > 0
+        # Pixel mode: tag 0x01, length 16 (packed), 16 bytes of pixel data
+        assert result[0] == 0x01
+        assert result[1] == 16
+
+    def test_pixel_mode_zero_block_empty_marker(self) -> None:
+        block = [[0] * 8 for _ in range(8)]
+        result = encode_block_dct(block, keep_coeffs=4, mode="pixel")
+        assert result == b"\xff"
+
+    def test_pixel_mode_decodable_by_simple_decoder(self) -> None:
+        from decode_simple import decode_simple_j650
+        import tempfile
+        from encoder import encode_image_dct
+
+        image = _make_test_image()
+        with tempfile.NamedTemporaryFile(suffix=".j650", delete=False) as tmp:
+            from pathlib import Path
+            tmp_path = Path(tmp.name)
+
+        try:
+            encode_image_dct(image, tmp_path, keep_coeffs=8, strategy="zigzag", mode="pixel")
+            decoded = decode_simple_j650(tmp_path)
+            assert len(decoded) == 16
+            assert all(0 <= p <= 3 for row in decoded for p in row)
+        finally:
+            tmp_path.unlink(missing_ok=True)
+
+    def test_all_strategies_work_in_pixel_mode(self) -> None:
+        block = [[(x + y) % 4 for x in range(8)] for y in range(8)]
+        for strategy in ("zigzag", "magnitude", "hybrid"):
+            result = encode_block_dct(block, keep_coeffs=4, strategy=strategy, mode="pixel")
+            assert len(result) > 0, f"pixel mode strategy {strategy} failed"
+
 
 class TestEncodeImageDCT:
     def test_writes_valid_j650(self) -> None:
@@ -60,6 +99,21 @@ class TestEncodeImageDCT:
             data = tmp_path.read_bytes()
             assert data[:4] == b"J650"
             assert len(data) > 12
+        finally:
+            tmp_path.unlink(missing_ok=True)
+
+    def test_pixel_mode_writes_valid_j650_decodable_by_classic_path(self) -> None:
+        from decode_simple import decode_simple_j650
+
+        image = _make_test_image()
+        with tempfile.NamedTemporaryFile(suffix=".j650", delete=False) as tmp:
+            tmp_path = Path(tmp.name)
+
+        try:
+            encode_image_dct(image, tmp_path, keep_coeffs=8, strategy="hybrid", mode="pixel")
+            decoded = decode_simple_j650(tmp_path)
+            assert len(decoded) == 16
+            assert all(0 <= p <= 3 for row in decoded for p in row)
         finally:
             tmp_path.unlink(missing_ok=True)
 

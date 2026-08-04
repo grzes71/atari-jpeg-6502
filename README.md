@@ -20,8 +20,7 @@ Eksperymentalny prototyp kompresora i dekodera obrazu zorientowanego na MOS 6502
 
 - dekoder 6502 jest nadal szkicem prototypowym, a nie pełnoprawnym, zoptymalizowanym implementacją hardware’ową,
 - obecny model kompresji jest stratny i oparty na zachowaniu wybranych współczynników w bloku 8×8,
-- pamięć dekodera jest nadal ograniczona do prostego, eksperymentalnego modelu,
-- w aktualnym szkicu dekodera brak jeszcze pełnego odwzorowania rekonstrukcji z bazowych bloków i pełnej arytmetyki Q8.8.
+- pamięć dekodera jest nadal ograniczona do prostego, eksperymentalnego modelu.
 
 ## Szybki start
 
@@ -54,16 +53,25 @@ python -m switch sample.bin \
 ### 3. Przez CLI — AI-Assisted Encoder (v1.0.0)
 
 ```bash
+# Tryb pixel (domyślny, zgodny z dekoderem 6502)
 python -m switch sample.bin \
   --width 160 \
   --height 192 \
   --ai \
   --strategy hybrid \
   --quant-table balanced \
-  --min-keep 4 \
-  --max-keep 64 \
+  --mode pixel \
   --output-bin output_ai.j650 \
   --output-asm decoder.asm
+
+# Tryb coefficients (współczynniki DCT, tylko dekoder Python)
+python -m switch sample.bin \
+  --width 160 \
+  --height 192 \
+  --ai \
+  --mode coefficients \
+  --strategy zigzag \
+  --keep-coeffs 8
 ```
 
 Dostępne strategie (`--strategy`):
@@ -72,9 +80,14 @@ Dostępne strategie (`--strategy`):
 - `hybrid` — adaptacyjna liczba współczynników z wagami pozycyjnymi.
 
 Dostępne tablice kwantyzacji (`--quant-table`):
-- `default` / `aggressive` — agresywna, najwyższa kompresja,
-- `balanced` — zbalansowana,
-- `fine` — wyższa jakość.
+- `aggressive` — agresywna, najwyższa kompresja,
+- `balanced` (domyślna) — zbalansowana,
+- `fine` — wyższa jakość,
+- `lossless` — brak kwantyzacji (identity), maksymalna jakość.
+
+Tryb wyjścia (`--mode`):
+- `pixel` (domyślny) — rekonstruuje piksele z wybranych współczynników DCT i zapisuje w formacie packed 16-bajtowym, w pełni zgodnym z dekoderem 6502,
+- `coefficients` — zapisuje rzadkie współczynniki DCT jako pary (indeks, wartość); wymaga dekodera z obsługą dekwantyzacji i IDCT.
 
 Przykładowo:
 - `--antic-mode E` oznacza 160×192 obrazu w 2 bpp / 4 kolory,
@@ -154,13 +167,26 @@ W praktyce wartości z zakresu `3..20` dają najbardziej sensowne przejścia mi�
 
 ## Eksperymenty
 
-Porównanie wszystkich strategii i tablic kwantyzacji na jednym obrazie:
+Porównanie wszystkich strategii i tablic kwantyzacji w trybie pixel (6502-compatible):
 
 ```bash
 python -m experiments.runner samples/witcher3.bin --width 160 --height 192 --output-json results.json
 ```
 
-Wynikiem jest tabela z PSNR, SSIM, rozmiarem pliku, liczbą współczynników i czasem kompresji dla każdej konfiguracji.
+Przykładowe wyniki (witcher3.bin, 160×192, ANTIC E, tryb pixel):
+
+```
+Label                    PSNR     SSIM  Size(B)  Time(s)
+-----------------------------------------------------------------
+zigzag-k1               11.83   0.4412     1682    1.446
+zigzag-k2               12.31   0.4873     4026    1.484
+zigzag-k4               13.06   0.5346     4697    1.463
+zigzag-k8               14.25   0.5892     5707    1.485
+zigzag-k16              15.49   0.6408     5860    1.528
+zigzag-k64                 inf   1.000     5841    1.510
+```
+
+Wynikiem jest tabela z PSNR, SSIM, rozmiarem pliku i czasem kompresji.
 
 ## Testy
 

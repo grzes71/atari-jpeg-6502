@@ -9,6 +9,7 @@ from block_utils import split_image_into_blocks
 from dct import forward_dct_2d, inverse_dct_2d, reconstruct_block_from_coefficients
 from fileformat import HEADER_SIZE, build_simple_block_payload, build_sparse_coefficient_payload, write_block, write_header
 from quantization import dequantize_block, dequantize_block_with_table, quantize_block, quantize_block_with_table
+from rle import encode_rle
 from zigzag import zigzag_indices
 
 
@@ -30,6 +31,7 @@ def encode_block_dct(
     strategy: str = "hybrid",
     quant_table: str = "default",
     selector_config: SelectionConfig | None = None,
+    mode: str = "coefficients",
 ) -> bytes:
     """Encode an 8×8 block using DCT + AI-assisted coefficient selection.
 
@@ -47,7 +49,21 @@ def encode_block_dct(
         ``"balanced"``, ``"fine"``).
     selector_config:
         Fine-grained configuration for ``"hybrid"`` strategy.
+    mode:
+        ``"coefficients"`` — store sparse (index, value) DCT coefficients
+        (needs DCT-capable decoder).  ``"pixel"`` — reconstruct pixels from
+        selected coefficients and store in packed 16-byte format (6502
+        decoder compatible).
     """
+    if mode == "pixel":
+        return _encode_block_dct_pixel(
+            block,
+            keep_coeffs=keep_coeffs,
+            strategy=strategy,
+            quant_table=quant_table,
+            selector_config=selector_config,
+        )
+
     table = get_quantization_table(quant_table)
 
     dct_coeffs = forward_dct_2d(block)
@@ -82,6 +98,107 @@ def encode_block_dct(
     )
 
 
+def _encode_block_dct_pixel(
+    block: list[list[int]],
+    keep_coeffs: int = 10,
+    strategy: str = "hybrid",
+    quant_table: str = "default",
+    selector_config: SelectionConfig | None = None,
+) -> bytes:
+    """AI-assisted DCT encoding → reconstruct pixels → packed 16-byte format.
+
+    This is the hybrid path: the AI selects coefficients in the DCT domain,
+    but the output is plain pixel values compatible with the 6502 decoder.
+
+    Pixel values are scaled 0..3 → 0..255 before DCT so that the standard
+    JPEG quantization tables operate in their designed range, then scaled
+    back after IDCT.
+    """
+    table = get_quantization_table(quant_table)
+
+    # Scale 0..3 pixels to 0..255 for proper DCT dynamic range,
+    # then level-shift by -128 (standard JPEG centering)
+    scaled_block = [[p * 85 - 128 for p in row] for row in block]
+
+    dct_coeffs = forward_dct_2d(scaled_block)
+    dct_rounded = [[int(round(v)) for v in row] for row in dct_coeffs]
+
+    # Direct integer quantisation (no Q8.8 clipping — DCT coeffs can
+    # exceed [-128,127] for 0..255 content even after level shift)
+    q_block: list[list[int]] = []
+    for row_idx in range(8):
+        q_row: list[int] = []
+        for col_idx in range(8):
+            divisor = max(1, table[row_idx][col_idx])
+            q_row.append(int(round(dct_rounded[row_idx][col_idx] / divisor)))
+        q_block.append(q_row)
+
+    selection = select_coefficients(
+        q_block,
+        strategy=strategy,
+        keep=keep_coeffs,
+        config=selector_config,
+    )
+
+    # Reconstruct coefficient matrix (only selected coefficients, rest zero)
+    coeffs = [0] * 64
+    for zz_idx, value in zip(selection.selected_indices, selection.selected_values):
+        coeffs[zigzag_indices[zz_idx]] = value
+
+    # Direct integer dequantisation
+    coeff_matrix = [[0 for _ in range(8)] for _ in range(8)]
+    for y in range(8):
+        for x in range(8):
+            coeff_matrix[y][x] = coeffs[y * 8 + x] * table[y][x]
+
+    pixels = inverse_dct_2d([[float(v) for v in row] for row in coeff_matrix])
+
+    # Scale back: reverse level shift +128, then 0..255 → 0..3
+    flat_pixels = [
+        max(0, min(3, int(round((pixels[row][col] + 128) / 85.0))))
+        for row in range(8)
+        for col in range(8)
+    ]
+
+    if all(p == 0 for p in flat_pixels):
+        return b"\xff"
+
+    # ----- Build candidate encodings (all 6502-decoder compatible) -----
+
+    # Packed: 16 bytes (always 18 total)
+    packed = bytearray(16)
+    for index, value in enumerate(flat_pixels):
+        byte_index = index // 4
+        bit_offset = (index % 4) * 2
+        packed[byte_index] |= (value & 0x03) << bit_offset
+    packed_payload = bytes([0x01, 16]) + bytes(packed)
+
+    # Sparse: (index, value) pairs — good when few pixels differ from zero
+    nonzero_pairs = [(i, v) for i, v in enumerate(flat_pixels) if v != 0]
+    if nonzero_pairs:
+        sparse_inner = bytearray([0x02])
+        for idx, val in nonzero_pairs:
+            sparse_inner.append(idx & 0x3F)
+            sparse_inner.append(val & 0x03)
+        sparse_payload = bytes([0x01, len(sparse_inner)]) + bytes(sparse_inner)
+    else:
+        sparse_payload = None
+
+    # RLE: (count, value) runs — great for uniform or striped blocks
+    rle_inner = bytearray([0x03])
+    rle_inner.extend(encode_rle(flat_pixels))
+    rle_payload = bytes([0x01, len(rle_inner)]) + bytes(rle_inner)
+
+    # Pick the smallest
+    best = packed_payload
+    if sparse_payload is not None and len(sparse_payload) < len(best):
+        best = sparse_payload
+    if len(rle_payload) < len(best):
+        best = rle_payload
+
+    return write_block(best)
+
+
 def encode_image(image: list[list[int]], output_path: str | Path, keep_coeffs: int = 10) -> Path:
     if not image or not image[0]:
         raise ValueError("image cannot be empty")
@@ -108,8 +225,13 @@ def encode_image_dct(
     strategy: str = "hybrid",
     quant_table: str = "default",
     selector_config: SelectionConfig | None = None,
+    mode: str = "coefficients",
 ) -> Path:
-    """Encode a full image using the DCT-aware path with AI coefficient selection."""
+    """Encode a full image using the DCT-aware path with AI coefficient selection.
+
+    *mode* can be ``"coefficients"`` (sparse DCT payload) or ``"pixel"``
+    (reconstruct pixels → packed 16-byte, 6502-decoder compatible).
+    """
     if not image or not image[0]:
         raise ValueError("image cannot be empty")
 
@@ -128,6 +250,7 @@ def encode_image_dct(
                 strategy=strategy,
                 quant_table=quant_table,
                 selector_config=selector_config,
+                mode=mode,
             )
         )
 

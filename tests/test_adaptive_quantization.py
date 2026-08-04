@@ -12,8 +12,8 @@ from adaptive_quantization import (
 
 
 class TestGetQuantizationTable:
-    def test_default_returns_aggressive(self) -> None:
-        assert get_quantization_table("default") == AGGRESSIVE_QUANT
+    def test_default_returns_balanced(self) -> None:
+        assert get_quantization_table("default") == BALANCED_QUANT
 
     def test_aggressive_is_valid(self) -> None:
         t = get_quantization_table("aggressive")
@@ -58,4 +58,5 @@ class TestListTables:
         assert "aggressive" in tables
         assert "balanced" in tables
         assert "fine" in tables
+        assert "lossless" in tables
         assert "default" in tables

@@ -2,6 +2,15 @@ from __future__ import annotations
 
 from dc_block import DCBlock
 from fileformat import J650FormatError
+from rle import decode_rle
+
+
+def _decode_rle_block(data: bytes) -> list[int]:
+    """Decode an RLE-encoded block payload (tag 0x03)."""
+    values = decode_rle(data)
+    if len(values) < 64:
+        values = values + [0] * (64 - len(values))
+    return values[:64]
 
 
 def decode_block_payload(payload: bytes) -> list[int]:
@@ -48,6 +57,9 @@ def decode_block_payload(payload: bytes) -> list[int]:
                 if 0 <= coeff_index < 64:
                     reconstructed[coeff_index] = coeff_value
         return reconstructed
+
+    if data and data[0] == 0x03:
+        return _decode_rle_block(data[1:])
 
     for marker_index, marker in enumerate(data):
         if marker == 0x02 and marker_index + 1 < len(data):
