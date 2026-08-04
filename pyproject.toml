@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "atari-jpeg-6502"
-version = "0.1.0"
+dynamic = ["version"]
 description = "A compact 6502-oriented JPEG-inspired image compressor/decompressor prototype"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -20,6 +20,9 @@ dev = [
 
 [project.scripts]
 switch = "switch.cli:main"
+
+[tool.setuptools.dynamic]
+version = {file = "VERSION"}
 
 [tool.setuptools]
 package-dir = {"" = "src"}
