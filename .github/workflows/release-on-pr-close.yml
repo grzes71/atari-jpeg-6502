@@ -115,7 +115,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Bump version in pyproject.toml
+      - name: Bump version in VERSION
         id: bump
         env:
           BUMP_LEVEL: ${{ needs.determine-release.outputs.bump_level }}
@@ -126,12 +126,12 @@ jobs:
           from pathlib import Path
 
           bump_level = os.environ["BUMP_LEVEL"].strip()
-          pyproject = Path("pyproject.toml")
-          content = pyproject.read_text(encoding="utf-8")
+          version_file = Path("VERSION")
+          content = version_file.read_text(encoding="utf-8").strip()
 
-          match = re.search(r'(?m)^version\s*=\s*"(\d+)\.(\d+)\.(\d+)"\s*$', content)
+          match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", content)
           if not match:
-              raise SystemExit("Could not find [project].version in pyproject.toml")
+              raise SystemExit("Could not find a semantic version in VERSION")
 
           major, minor, patch = map(int, match.groups())
           old_version = f"{major}.{minor}.{patch}"
@@ -149,8 +149,7 @@ jobs:
               raise SystemExit(f"Unsupported bump level: {bump_level}")
 
           new_version = f"{major}.{minor}.{patch}"
-          updated = content[: match.start()] + f'version = "{new_version}"' + content[match.end() :]
-          pyproject.write_text(updated, encoding="utf-8")
+          version_file.write_text(f"{new_version}\n", encoding="utf-8")
 
           out = Path(".github_release_vars")
           out.write_text(
@@ -165,7 +164,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add pyproject.toml
+          git add VERSION pyproject.toml
           git commit -m "chore(release): v${{ steps.bump.outputs.new_version }}"
           git tag "v${{ steps.bump.outputs.new_version }}"
           git push origin HEAD

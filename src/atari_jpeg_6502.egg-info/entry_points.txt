@@ -1,0 +1,2 @@
+[console_scripts]
+switch = switch.cli:main
